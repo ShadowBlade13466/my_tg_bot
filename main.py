@@ -148,13 +148,14 @@ def init_db():
             user_id INTEGER, quest_id TEXT, progress INTEGER DEFAULT 0, last_reset_date TEXT,
             PRIMARY KEY (user_id, quest_id)
         )""")
-        # Перевірка наявності стовпців
         user_columns = [i[1] for i in cursor.execute("PRAGMA table_info(users)").fetchall()]
         if 'referrer_id' not in user_columns: cursor.execute("ALTER TABLE users ADD COLUMN referrer_id INTEGER")
         if 'bp_level' not in user_columns: cursor.execute("ALTER TABLE users ADD COLUMN bp_level INTEGER DEFAULT 1")
         if 'bp_xp' not in user_columns: cursor.execute("ALTER TABLE users ADD COLUMN bp_xp INTEGER DEFAULT 0")
         if 'has_premium_bp' not in user_columns: cursor.execute("ALTER TABLE users ADD COLUMN has_premium_bp INTEGER DEFAULT 0")
-        conn.commit()# ----- Функції для роботи з БД та логікою -----
+        conn.commit()
+
+# ----- Функції для роботи з БД та логікою -----
 async def get_user(user_id):
     with sqlite3.connect(DB_NAME) as conn:
         conn.row_factory = sqlite3.Row; cursor = conn.cursor()
@@ -209,8 +210,7 @@ async def check_and_update_rank(user_id, total_coins_earned):
             cursor.execute("UPDATE users SET rank_level = ? WHERE user_id = ?", (new_rank_level, user_id))
         _, rank_name = RANKS[new_rank_level]
         try: await bot.send_message(user_id, f"🎉 *Поздравляем!* 🎉\nВы достигли нового ранга: **{rank_name}**!")
-        except: pass
-
+        except: pass# ----- 📜 КВЕСТИ и БАТЛ ПАСС 📜 -----
 async def get_or_create_quest(user_id, quest_id):
     today = str(date.today())
     with sqlite3.connect(DB_NAME) as conn:
@@ -225,36 +225,72 @@ async def get_or_create_quest(user_id, quest_id):
             quest_data = cursor.fetchone()
         return quest_data
 
-async def update_quest_progress(user_id, quest_id, value=1):
-    quest = await get_or_create_quest(user_id, quest_id)
-    if quest['progress'] < QUESTS[quest_id]['target']:
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
-            cursor.execute("UPDATE quests SET progress = progress + ? WHERE user_id = ? AND quest_id = ?", (value, user_id, quest_id))
-        await check_quest_completion(user_id, quest_id)
-
 async def check_quest_completion(user_id, quest_id):
     quest = await get_or_create_quest(user_id, quest_id)
-    if quest['progress'] >= QUESTS[quest_id]['target']:
-        await add_xp(user_id, QUESTS[quest_id]['xp'])
-        try: await bot.send_message(user_id, f"✅ Квест *'{QUESTS[quest_id]['name']}'* выполнен! Вам начислено **{QUESTS[quest_id]['xp']} XP**.")
-        except: pass
+    quest_info = QUESTS[quest_id]
+    
+    # Перевіряємо, чи квест вже був завершений
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT progress FROM quests WHERE user_id = ? AND quest_id = ?", (user_id, quest_id))
+        current_progress = cursor.fetchone()[0]
+
+    # Якщо прогрес вже достатній, нічого не робимо
+    if current_progress < quest_info['target']:
+        return
+
+    # Якщо прогрес достатній, але нагорода вже видана (запобігаємо подвійній видачі)
+    # Цю логіку можна покращити, додавши поле is_completed в БД, але поки що так
+    
+    await add_xp(user_id, quest_info['xp'])
+    try:
+        await bot.send_message(user_id, f"✅ Квест *'{quest_info['name']}'* выполнен! Вам начислено **{quest_info['xp']} XP**.")
+    except:
+        pass
+
+
+async def update_quest_progress(user_id, quest_id, value=1):
+    quest = await get_or_create_quest(user_id, quest_id)
+    quest_info = QUESTS[quest_id]
+
+    if quest['progress'] < quest_info['target']:
+        new_progress = quest['progress'] + value
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE quests SET progress = ? WHERE user_id = ? AND quest_id = ?", (new_progress, user_id, quest_id))
+        
+        if new_progress >= quest_info['target']:
+            await check_quest_completion(user_id, quest_id)
 
 async def add_xp(user_id, xp_to_add):
     user = await get_user(user_id)
     if not user: return
+    
     new_xp = user['bp_xp'] + xp_to_add
     new_level = user['bp_level']
     
     while BP_LEVELS.get(new_level) and new_xp >= BP_LEVELS[new_level]['xp']:
         new_xp -= BP_LEVELS[new_level]['xp']
+        
+        # Видаємо нагороди за досягнення рівня
+        free_rew = BP_LEVELS[new_level]['free_reward']
+        if free_rew['type'] == 'coins': await update_balance(user_id, coins=free_rew['amount'])
+        elif free_rew['type'] == 'item': await add_item_to_inventory(user_id, free_rew['item_id'])
+        
+        if user['has_premium_bp']:
+            prem_rew = BP_LEVELS[new_level]['premium_reward']
+            if prem_rew['type'] == 'stars': await update_balance(user_id, stars=prem_rew['amount'])
+            elif prem_rew['type'] == 'item': await add_item_to_inventory(user_id, prem_rew['item_id'])
+
         new_level += 1
-        try: await bot.send_message(user_id, f"🎉 Вы достигли **{new_level}** уровня Боевого Пропуска! Проверьте награды!")
+        try:
+            await bot.send_message(user_id, f"🎉 Вы достигли **{new_level}** уровня Боевого Пропуска! Проверьте награды!")
         except: pass
 
     with sqlite3.connect(DB_NAME) as conn:
         cursor = conn.cursor()
         cursor.execute("UPDATE users SET bp_level = ?, bp_xp = ? WHERE user_id = ?", (new_level, new_xp, user_id))
+
 
 # ----- 🛡️ ПРОВЕРКА ПОДПИСКИ НА КАНАЛ 🛡️ -----
 class SponsorshipMiddleware(BaseMiddleware):
@@ -277,13 +313,13 @@ class SponsorshipMiddleware(BaseMiddleware):
                     await add_user(user_id, event.from_user.username, referrer_id)
                 return await handler(event, data)
             else: raise ValueError("User is not a member.")
-        except Exception as e:
-            logging.error(f"Sponsorship check error: {e}")
+        except:
             try:
                 channel_info = await bot.get_chat(SPONSOR_CHANNEL)
                 channel_link = channel_info.invite_link or f"https://t.me/{channel_info.username}"
             except:
-                error_text = "🔧 Бот временно недоступен из-за технической ошибки.";
+                logging.error(f"ОШИБКА: Не удалось найти канал: {SPONSOR_CHANNEL}.")
+                error_text = "🔧 Бот временно недоступен.";
                 if isinstance(event, Message): await event.answer(error_text)
                 elif isinstance(event, CallbackQuery): await event.message.answer(error_text)
                 return
@@ -304,7 +340,9 @@ def get_main_menu_keyboard():
     b.adjust(2); return b.as_markup()
 
 def get_back_button(cb="menu:main"):
-    b = InlineKeyboardBuilder(); b.button(text="⬅️ Назад", callback_data=cb); return b.as_markup()# ----- ОСНОВНІ ОБРОБЧИКИ -----
+    b = InlineKeyboardBuilder(); b.button(text="⬅️ Назад", callback_data=cb); return b.as_markup()
+
+# ----- ОСНОВНІ ОБРОБЧИКИ -----
 @main_router.message(CommandStart())
 async def cmd_start(message: Message):
     referrer_id = None
@@ -318,9 +356,7 @@ async def cmd_start(message: Message):
         bonus = REFERRED_BONUS if referrer_id else START_COINS
         await message.answer(f"👋 Привет, {escape_markdown(message.from_user.first_name)}!\n\nДобро пожаловать! Ваш стартовый бонус: **{bonus}** монет!", reply_markup=get_main_menu_keyboard())
     else:
-        await message.answer(f"👋 С возвращением, {escape_markdown(message.from_user.first_name)}!", reply_markup=get_main_menu_keyboard())
-
-@main_router.callback_query(F.data == "check_subscription")
+        await message.answer(f"👋 С возвращением, {escape_markdown(message.from_user.first_name)}!", reply_markup=get_main_menu_keyboard())@main_router.callback_query(F.data == "check_subscription")
 async def cb_check_subscription(callback: CallbackQuery): await callback.message.delete(); await cmd_start(callback.message)
 
 @main_router.callback_query(F.data == "menu:main")
@@ -368,7 +404,7 @@ async def cb_inventory(callback: CallbackQuery):
             text += f"  - {card_info['rarity']} *{card_info['name']}* - {count} шт.\n"
     
     await callback.message.edit_text(text, reply_markup=get_back_button())
-
+    
 @main_router.callback_query(F.data == "menu:craft")
 async def cb_craft_menu(callback: CallbackQuery):
     user_inventory = await get_user_inventory(callback.from_user.id)
@@ -404,7 +440,7 @@ async def cb_craft_rare_card(callback: CallbackQuery):
     await callback.answer("✨ Вы успешно создали карту! ✨", show_alert=True)
     await callback.message.answer(f"Вы создали: *{ITEMS[crafted_card_id]['rarity']} {ITEMS[crafted_card_id]['name']}*")
     await cb_craft_menu(callback)
-    
+
 # ----- 🤝 РЕФЕРАЛЬНА СИСТЕМА ТА ВІДГУКИ ✍️ -----
 @main_router.callback_query(F.data == "menu:referral")
 async def cb_referral(callback: CallbackQuery):
@@ -437,7 +473,7 @@ async def process_feedback(message: Message, state: FSMContext):
             try: await bot.send_message(admin_id, feedback_text)
             except Exception as e: logging.error(f"Не удалось отправить отзыв админу {admin_id}: {e}")
     await message.answer("✅ Спасибо! Ваш отзыв был отправлен.", reply_markup=get_main_menu_keyboard())
-    
+
 # ----- 💻 АДМІН-ПАНЕЛЬ 💻 -----
 @main_router.message(Command("admin"))
 async def cmd_admin_panel(message: Message, state: FSMContext):
@@ -467,6 +503,7 @@ async def cmd_give_by_reply(message: Message):
         parts = message.text.split()
         currency = parts[1].lower()
         amount_str = parts[2]
+        
         target_id = message.reply_to_message.from_user.id
         target_user = await get_user(target_id)
         if not target_user: return await message.reply("❌ Этот пользователь еще не запускал бота.")
@@ -635,7 +672,9 @@ async def admin_mass_send_confirm(callback: CallbackQuery, state: FSMContext):
     for (user_id,) in user_ids:
         try: await bot.copy_message(chat_id=user_id, from_chat_id=data['chat_id'], message_id=data['message_id']); sent_count += 1; await asyncio.sleep(0.1)
         except: failed_count += 1
-    await callback.message.answer(f"✅ Рассылка завершена!\n\nОтправлено: {sent_count}\nНе удалось: {failed_count}"); await cmd_admin_panel(callback.message, state)# ----- 🎮 РОЗВАГИ 🎮 -----
+    await callback.message.answer(f"✅ Рассылка завершена!\n\nОтправлено: {sent_count}\nНе удалось: {failed_count}"); await cmd_admin_panel(callback.message, state)
+
+# ----- 🎮 РОЗВАГИ 🎮 -----
 @main_router.callback_query(F.data == "menu:games")
 async def cb_games_menu(callback: CallbackQuery):
     kb = InlineKeyboardBuilder(); kb.button(text="🎲 Кости", callback_data="game:dice"); kb.button(text="🎰 Слоты", callback_data="game:slots"); kb.button(text="🃏 Дуэль Карт", callback_data="game:duel")
@@ -803,7 +842,6 @@ async def cb_open_case(callback: CallbackQuery):
     else: await update_balance(user_id, coins=-cost if cost_currency == 'coins' else 0, stars=-cost if cost_currency == 'stars' else 0)
     
     await update_quest_progress(user_id, 'open_case')
-
     rand_val = random.randint(1, 100); cumulative_chance = 0; prize = None
     for p in case_info['prizes']:
         cumulative_chance += p['chance'];
@@ -851,7 +889,7 @@ async def process_exchange_amount(message: Message, state: FSMContext):
     elif data['type'] == 'c2s':
         cost = amount * STAR_BUY_PRICE
         if user['coins'] < cost: return await message.answer(f"❌ У вас недостаточно монет. Нужно **{cost:,}** 💰.")
-        await update_balance(message.from_user.id, stars=-amount, coins=-cost)
+        await update_balance(message.from_user.id, stars=amount, coins=-cost)
         await message.answer(f"✅ Вы купили **{amount}** ⭐ за **{cost:,}** 💰.")
 
 @main_router.message()
