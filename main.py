@@ -5,7 +5,7 @@ import logging
 import sqlite3
 import random
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 from aiogram import Bot, Dispatcher, types, F, Router, BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
@@ -37,6 +37,7 @@ REFERRED_BONUS = 2000
 MIN_BET = 50
 STAR_SELL_PRICE = 20000
 STAR_BUY_PRICE = 22000
+BATTLE_PASS_COST_STARS = 25 # Вартість преміум Батл Пасу
 
 # ----- 📈 РАНГИ 📈 -----
 RANKS = {
@@ -51,36 +52,54 @@ RANKS = {
 # ----- 🃏 ПРЕДМЕТИ 🃏 -----
 RARITY_POWER = {'⚪️ Обычная': 1, '🟢 Редкая': 2, '🔵 Эпическая': 3, '🟣 Легендарная': 4, '🟠 Мифическая': 5, '⚜️ Уникальная': 10}
 ITEMS = {
-    'c1': {'name': 'Карта Новичка', 'rarity': '⚪️ Обычная', 'type': 'card', 'power': RARITY_POWER['⚪️ Обычная']},
-    'c2': {'name': 'Талисман Удачи', 'rarity': '⚪️ Обычная', 'type': 'card', 'power': RARITY_POWER['⚪️ Обычная']},
-    'c3': {'name': 'Древняя Монета', 'rarity': '🟢 Редкая', 'type': 'card', 'power': RARITY_POWER['🟢 Редкая']},
-    'c4': {'name': 'Кристалл Энергии', 'rarity': '🟢 Редкая', 'type': 'card', 'power': RARITY_POWER['🟢 Редкая']},
-    'c5': {'name': 'Звёздная Карта', 'rarity': '🔵 Эпическая', 'type': 'card', 'power': RARITY_POWER['🔵 Эпическая']},
-    'c6': {'name': 'Эссенция Богатства', 'rarity': '🔵 Эпическая', 'type': 'card', 'power': RARITY_POWER['🔵 Эпическая']},
-    'c7': {'name': 'Корона Правителя', 'rarity': '🟣 Легендарная', 'type': 'card', 'power': RARITY_POWER['🟣 Легендарная']},
-    'c8': {'name': 'Осколок Вселенной', 'rarity': '🟣 Легендарная', 'type': 'card', 'power': RARITY_POWER['🟣 Легендарная']},
-    'c9': {'name': 'Сердце Галактики', 'rarity': '🟠 Мифическая', 'type': 'card', 'power': RARITY_POWER['🟠 Мифическая']},
-    'c10': {'name': 'Карта COINVERSE', 'rarity': '⚜️ Уникальная', 'type': 'card', 'power': RARITY_POWER['⚜️ Уникальная']},
-    'c11': {'name': 'Посох Архимага', 'rarity': '🔵 Эпическая', 'type': 'card', 'power': RARITY_POWER['🔵 Эпическая']},
-    'c12': {'name': 'Драконья Чешуя', 'rarity': '🔵 Эпическая', 'type': 'card', 'power': RARITY_POWER['🔵 Эпическая']},
-    'c13': {'name': 'Скипетр Власти', 'rarity': '🟣 Легендарная', 'type': 'card', 'power': RARITY_POWER['🟣 Легендарная']},
-    'c14': {'name': 'Душа Титана', 'rarity': '🟣 Легендарная', 'type': 'card', 'power': RARITY_POWER['🟣 Легендарная']},
-    'c15': {'name': 'Перо Феникса', 'rarity': '🟠 Мифическая', 'type': 'card', 'power': RARITY_POWER['🟠 Мифическая']},
-    'c16': {'name': 'Токен Основателя', 'rarity': '⚜️ Уникальная', 'type': 'card', 'power': RARITY_POWER['⚜️ Уникальная']},
+    'c1': {'name': 'Карта Новичка', 'rarity': '⚪️ Обычная', 'type': 'card', 'power': 1},
+    'c2': {'name': 'Талисман Удачи', 'rarity': '⚪️ Обычная', 'type': 'card', 'power': 1},
+    'c3': {'name': 'Проклятый Дублон', 'rarity': '⚪️ Обычная', 'type': 'card', 'power': 1},
+    'c4': {'name': 'Пыльный Свиток', 'rarity': '⚪️ Обычная', 'type': 'card', 'power': 1},
+    'c5': {'name': 'Древняя Монета', 'rarity': '🟢 Редкая', 'type': 'card', 'power': 2},
+    'c6': {'name': 'Кристалл Энергии', 'rarity': '🟢 Редкая', 'type': 'card', 'power': 2},
+    'c7': {'name': 'Зелье Исцеления', 'rarity': '🟢 Редкая', 'type': 'card', 'power': 2},
+    'c8': {'name': 'Амулет Защиты', 'rarity': '🟢 Редкая', 'type': 'card', 'power': 2},
+    'c9': {'name': 'Звёздная Карта', 'rarity': '🔵 Эпическая', 'type': 'card', 'power': 3},
+    'c10': {'name': 'Эссенция Богатства', 'rarity': '🔵 Эпическая', 'type': 'card', 'power': 3},
+    'c11': {'name': 'Плащ-невидимка', 'rarity': '🔵 Эпическая', 'type': 'card', 'power': 3},
+    'c12': {'name': 'Сапоги-скороходы', 'rarity': '🔵 Эпическая', 'type': 'card', 'power': 3},
+    'c13': {'name': 'Корона Правителя', 'rarity': '🟣 Легендарная', 'type': 'card', 'power': 4},
+    'c14': {'name': 'Осколок Вселенной', 'rarity': '🟣 Легендарная', 'type': 'card', 'power': 4},
+    'c15': {'name': 'Молот Тора', 'rarity': '🟣 Легендарная', 'type': 'card', 'power': 4},
+    'c16': {'name': 'Трезубец Посейдона', 'rarity': '🟣 Легендарная', 'type': 'card', 'power': 4},
+    'c17': {'name': 'Сердце Галактики', 'rarity': '🟠 Мифическая', 'type': 'card', 'power': 5},
+    'c18': {'name': 'Перо Феникса', 'rarity': '🟠 Мифическая', 'type': 'card', 'power': 5},
+    'c19': {'name': 'Кровь Грифона', 'rarity': '🟠 Мифическая', 'type': 'card', 'power': 5},
+    'c20': {'name': 'Карта COINVERSE', 'rarity': '⚜️ Уникальная', 'type': 'card', 'power': 10},
     'key1': {'name': 'Ключ от Сокровищницы', 'rarity': '🟢 Редкая', 'type': 'item'},
+    'fragment1': {'name': 'Фрагмент карты', 'rarity': '⚪️ Обычная', 'type': 'craft_item'},
+    'exp_sphere': {'name': 'Сфера опыта', 'rarity': '🔵 Эпическая', 'type': 'exp_item', 'xp': 50},
 }
 
 # ----- 🎁 КЕЙСИ 🎁 -----
 CASES = {
-    'bronze': {'name': '🥉 Бронзовый кейс', 'cost': 500, 'currency': 'coins',
-               'prizes': [ {'type': 'coins', 'amount': (100, 450), 'chance': 65}, {'type': 'item', 'item_id': 'c1', 'chance': 15}, {'type': 'item', 'item_id': 'c2', 'chance': 15}, {'type': 'item', 'item_id': 'key1', 'chance': 5},]},
-    'silver': {'name': '🥈 Серебряный кейс', 'cost': 2500, 'currency': 'coins',
-               'prizes': [ {'type': 'coins', 'amount': (1000, 2200), 'chance': 55}, {'type': 'stars', 'amount': (1, 3), 'chance': 15}, {'type': 'item', 'item_id': 'c3', 'chance': 15}, {'type': 'item', 'item_id': 'c5', 'chance': 10}, {'type': 'item', 'item_id': 'key1', 'chance': 5},]},
-    'gold':   {'name': '🥇 Золотой кейс', 'cost': 10, 'currency': 'stars',
-               'prizes': [ {'type': 'coins', 'amount': (15000, 25000), 'chance': 50}, {'type': 'item', 'item_id': 'c7', 'chance': 40}, {'type': 'item', 'item_id': 'c9', 'chance': 9}, {'type': 'item', 'item_id': 'c10', 'chance': 1},]},
-    'treasure': {'name': '💎 Кейс Сокровищницы', 'cost': 1, 'currency': 'key1',
-                 'prizes': [ {'type': 'stars', 'amount': (10, 25), 'chance': 50}, {'type': 'item', 'item_id': 'c8', 'chance': 30}, {'type': 'item', 'item_id': 'c10', 'chance': 20},]}
+    'rusty': {'name': '🔩 Ржавый ящик', 'cost': 100, 'currency': 'coins', 'prizes': [{'type': 'coins', 'amount': (10, 80), 'chance': 90}, {'type': 'item', 'item_id': 'fragment1', 'chance': 10}]},
+    'bronze': {'name': '🥉 Бронзовый кейс', 'cost': 500, 'currency': 'coins', 'prizes': [ {'type': 'coins', 'amount': (100, 450), 'chance': 65}, {'type': 'item', 'item_id': 'c1', 'chance': 15}, {'type': 'item', 'item_id': 'c2', 'chance': 15}, {'type': 'item', 'item_id': 'key1', 'chance': 5},]},
+    'silver': {'name': '🥈 Серебряный кейс', 'cost': 2500, 'currency': 'coins', 'prizes': [ {'type': 'coins', 'amount': (1000, 2200), 'chance': 55}, {'type': 'stars', 'amount': (1, 3), 'chance': 15}, {'type': 'item', 'item_id': 'c3', 'chance': 15}, {'type': 'item', 'item_id': 'c5', 'chance': 10}, {'type': 'item', 'item_id': 'key1', 'chance': 5},]},
+    'gold':   {'name': '🥇 Золотой кейс', 'cost': 10, 'currency': 'stars', 'prizes': [ {'type': 'coins', 'amount': (15000, 25000), 'chance': 50}, {'type': 'item', 'item_id': 'c7', 'chance': 40}, {'type': 'item', 'item_id': 'c9', 'chance': 9}, {'type': 'item', 'item_id': 'c10', 'chance': 1},]},
+    'treasure': {'name': '💎 Кейс Сокровищницы', 'cost': 1, 'currency': 'key1', 'prizes': [ {'type': 'stars', 'amount': (10, 25), 'chance': 50}, {'type': 'item', 'item_id': 'c8', 'chance': 30}, {'type': 'item', 'item_id': 'c10', 'chance': 20},]},
+    'diamond': {'name': '💎 Алмазный кейс', 'cost': 50, 'currency': 'stars', 'prizes': [ {'type': 'stars', 'amount': (25, 45), 'chance': 50}, {'type': 'item', 'item_id': 'c10', 'chance': 25}, {'type': 'item', 'item_id': 'exp_sphere', 'chance': 25},]},
+    'legendary': {'name': '🟣 Легендарный ларец', 'cost': 25, 'currency': 'stars', 'prizes': [{'type': 'item', 'item_id': 'c13', 'chance': 40}, {'type': 'item', 'item_id': 'c14', 'chance': 30}, {'type': 'item', 'item_id': 'c15', 'chance': 30}]},
 }
+
+# ----- 📜 КВЕСТИ 📜 -----
+QUESTS = {
+    'open_case': {'name': 'Откройте 3 кейса', 'target': 3, 'xp': 20},
+    'play_casino': {'name': 'Сыграйте в казино 5 раз', 'target': 5, 'xp': 15},
+    'invite_friend': {'name': 'Пригласите 1 друга', 'target': 1, 'xp': 50}
+}
+
+# ----- 🏆 BATTLE PASS 🏆 -----
+BP_LEVELS = {i: {'xp': i * 50, 'free_reward': {'type': 'coins', 'amount': i * 500}, 'premium_reward': {'type': 'stars', 'amount': i}} for i in range(1, 21)}
+BP_LEVELS[5]['premium_reward'] = {'type': 'item', 'item_id': 'key1'}
+BP_LEVELS[10]['premium_reward'] = {'type': 'item', 'item_id': 'c7'}
+BP_LEVELS[20]['premium_reward'] = {'type': 'item', 'item_id': 'c10'}
 
 # ----- Базові настройки -----
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="Markdown"))
@@ -116,21 +135,28 @@ def init_db():
             user_id INTEGER PRIMARY KEY, username TEXT, coins INTEGER DEFAULT 0, stars INTEGER DEFAULT 0,
             total_coins_earned INTEGER DEFAULT 0, rank_level INTEGER DEFAULT 1,
             daily_bonus_streak INTEGER DEFAULT 0, last_bonus_date TEXT,
-            referrer_id INTEGER,
-            join_date DATETIME DEFAULT CURRENT_TIMESTAMP
+            referrer_id INTEGER, join_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            bp_level INTEGER DEFAULT 1, bp_xp INTEGER DEFAULT 0, has_premium_bp INTEGER DEFAULT 0
         )""")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventory (
             id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, item_id TEXT,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         )""")
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS quests (
+            user_id INTEGER, quest_id TEXT, progress INTEGER DEFAULT 0, last_reset_date TEXT,
+            PRIMARY KEY (user_id, quest_id)
+        )""")
         try:
-            cursor.execute("SELECT referrer_id FROM users LIMIT 1")
+            cursor.execute("SELECT bp_level FROM users LIMIT 1")
         except sqlite3.OperationalError:
-            cursor.execute("ALTER TABLE users ADD COLUMN referrer_id INTEGER")
+            cursor.execute("ALTER TABLE users ADD COLUMN bp_level INTEGER DEFAULT 1")
+            cursor.execute("ALTER TABLE users ADD COLUMN bp_xp INTEGER DEFAULT 0")
+            cursor.execute("ALTER TABLE users ADD COLUMN has_premium_bp INTEGER DEFAULT 0")
         conn.commit()
 
-# ----- Функції для роботи з БД -----
+# ----- Функції для роботи з БД та логікою -----
 async def get_user(user_id):
     with sqlite3.connect(DB_NAME) as conn:
         conn.row_factory = sqlite3.Row; cursor = conn.cursor()
@@ -142,7 +168,10 @@ async def add_user(user_id, username, referrer_id=None):
         cursor = conn.cursor()
         start_coins = REFERRED_BONUS if referrer_id else START_COINS
         cursor.execute("INSERT OR IGNORE INTO users (user_id, username, coins, total_coins_earned, referrer_id) VALUES (?, ?, ?, ?, ?)", (user_id, username or "Без имени", start_coins, start_coins, referrer_id))
-        conn.commit()
+        if referrer_id:
+            cursor.execute("INSERT OR IGNORE INTO quests (user_id, quest_id, progress, last_reset_date) VALUES (?, ?, ?, ?)", (referrer_id, 'invite_friend', 0, str(date.today())))
+            cursor.execute("UPDATE quests SET progress = progress + 1 WHERE user_id = ? AND quest_id = 'invite_friend'", (referrer_id,))
+    await check_quest_completion(referrer_id, 'invite_friend')
 
 async def update_balance(user_id, coins=0, stars=0, earned=False):
     current_data = await get_user(user_id)
@@ -184,9 +213,7 @@ async def check_and_update_rank(user_id, total_coins_earned):
             cursor.execute("UPDATE users SET rank_level = ? WHERE user_id = ?", (new_rank_level, user_id))
         _, rank_name = RANKS[new_rank_level]
         try: await bot.send_message(user_id, f"🎉 *Поздравляем!* 🎉\nВы достигли нового ранга: **{rank_name}**!")
-        except: pass
-
-# ----- 🛡️ ПРОВЕРКА ПОДПИСКИ НА КАНАЛ 🛡️ -----
+        except: pass# ----- 🛡️ ПРОВЕРКА ПОДПИСКИ НА КАНАЛ 🛡️ -----
 class SponsorshipMiddleware(BaseMiddleware):
     async def __call__(self, handler, event: Message | CallbackQuery, data):
         user_id = event.from_user.id
@@ -226,13 +253,127 @@ def get_main_menu_keyboard():
     b = InlineKeyboardBuilder()
     b.button(text="👤 Профиль", callback_data="menu:profile"); b.button(text="🎒 Инвентарь", callback_data="menu:inventory")
     b.button(text="🎁 Кейсы", callback_data="menu:cases"); b.button(text="🎮 Развлечения", callback_data="menu:games")
+    b.button(text="📜 Квесты", callback_data="menu:quests"); b.button(text="🏆 Боевой Пропуск", callback_data="menu:battle_pass")
     b.button(text="💱 Обмен", callback_data="menu:exchange"); b.button(text="🗓️ Бонус", callback_data="menu:daily_bonus")
     b.button(text="🏆 Топы", callback_data="menu:tops"); b.button(text="🤝 Пригласить друга", callback_data="menu:referral")
-    b.button(text="✍️ Отзывы", callback_data="menu:feedback")
+    b.button(text="✍️ Отзывы", callback_data="menu:feedback"); b.button(text="🛠️ Крафт", callback_data="menu:craft")
     b.adjust(2); return b.as_markup()
 
 def get_back_button(cb="menu:main"):
-    b = InlineKeyboardBuilder(); b.button(text="⬅️ Назад", callback_data=cb); return b.as_markup()# ----- ОСНОВНІ ОБРОБЧИКИ -----
+    b = InlineKeyboardBuilder(); b.button(text="⬅️ Назад", callback_data=cb); return b.as_markup()
+
+# ----- 📜 КВЕСТИ и БАТЛ ПАСС 📜 -----
+async def get_or_create_quest(user_id, quest_id):
+    today = str(date.today())
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM quests WHERE user_id = ? AND quest_id = ?", (user_id, quest_id))
+        quest_data = cursor.fetchone()
+        if not quest_data or quest_data['last_reset_date'] != today:
+            cursor.execute("INSERT OR REPLACE INTO quests (user_id, quest_id, progress, last_reset_date) VALUES (?, ?, 0, ?)", (user_id, quest_id, today))
+            cursor.execute("SELECT * FROM quests WHERE user_id = ? AND quest_id = ?", (user_id, quest_id))
+            quest_data = cursor.fetchone()
+        return quest_data
+
+async def update_quest_progress(user_id, quest_id, value=1):
+    quest = await get_or_create_quest(user_id, quest_id)
+    if quest['progress'] < QUESTS[quest_id]['target']:
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE quests SET progress = progress + ? WHERE user_id = ? AND quest_id = ?", (value, user_id, quest_id))
+        await check_quest_completion(user_id, quest_id)
+
+async def check_quest_completion(user_id, quest_id):
+    quest = await get_or_create_quest(user_id, quest_id)
+    if quest['progress'] >= QUESTS[quest_id]['target']:
+        await add_xp(user_id, QUESTS[quest_id]['xp'])
+        try: await bot.send_message(user_id, f"✅ Квест *'{QUESTS[quest_id]['name']}'* выполнен! Вам начислено **{QUESTS[quest_id]['xp']} XP**.")
+        except: pass
+
+async def add_xp(user_id, xp_to_add):
+    user = await get_user(user_id)
+    new_xp = user['bp_xp'] + xp_to_add
+    new_level = user['bp_level']
+    
+    while new_level in BP_LEVELS and new_xp >= BP_LEVELS[new_level]['xp']:
+        new_xp -= BP_LEVELS[new_level]['xp']
+        new_level += 1
+        try:
+            await bot.send_message(user_id, f"🎉 Вы достигли **{new_level}** уровня Боевого Пропуска! Проверьте награды!")
+        except: pass
+
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET bp_level = ?, bp_xp = ? WHERE user_id = ?", (new_level, new_xp, user_id))
+
+@main_router.callback_query(F.data == "menu:quests")
+async def cb_quests(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    text = "📜 *Ежедневные квесты:*\n\n"
+    all_completed = True
+    for q_id, q_info in QUESTS.items():
+        quest = await get_or_create_quest(user_id, q_id)
+        progress = quest['progress']
+        target = q_info['target']
+        if progress < target:
+            all_completed = False
+        status = "✅" if progress >= target else "❌"
+        text += f"{status} {q_info['name']} ({progress}/{target})\n"
+    if all_completed:
+        text += "\n*Все квесты на сегодня выполнены! Возвращайтесь завтра.*"
+    await callback.message.edit_text(text, reply_markup=get_back_button())
+
+@main_router.callback_query(F.data == "menu:battle_pass")
+async def cb_battle_pass(callback: CallbackQuery, state: FSMContext):
+    user = await get_user(callback.from_user.id)
+    text = f"🏆 *Боевой Пропуск (Сезон 1)*\nВаш уровень: **{user['bp_level']}**\nОпыт: **{user['bp_xp']}/{BP_LEVELS.get(user['bp_level'], {'xp': '???'})['xp']}**\n\n"
+    
+    kb = InlineKeyboardBuilder()
+    if not user['has_premium_bp']:
+        kb.button(text=f"Купить Премиум за {BATTLE_PASS_COST_STARS} ⭐", callback_data="bp:buy")
+    
+    text += "*Награды:*\n"
+    for level, rewards in list(BP_LEVELS.items())[:5]: # Показуємо перші 5 рівнів
+        free_rew = rewards['free_reward']
+        prem_rew = rewards['premium_reward']
+        
+        free_rew_text = f"{free_rew['amount']} {free_rew['type']}" if free_rew['type'] in ['coins', 'stars'] else ITEMS[free_rew['item_id']]['name']
+        prem_rew_text = f"{prem_rew['amount']} {prem_rew['type']}" if prem_rew['type'] in ['coins', 'stars'] else ITEMS[prem_rew['item_id']]['name']
+        
+        status = "✅" if user['bp_level'] > level else "➡️"
+        text += f"{status} *Уровень {level}:*\n  - Бесплатно: {free_rew_text}\n"
+        if user['has_premium_bp']:
+            text += f"  - Премиум: {prem_rew_text}\n"
+        else:
+            text += f"  - 🔒 Премиум: {prem_rew_text}\n"
+
+    kb.button(text="⬅️ Назад", callback_data="menu:main")
+    kb.adjust(1)
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+
+@main_router.callback_query(F.data == "bp:buy")
+async def cb_buy_bp(callback: CallbackQuery):
+    user = await get_user(callback.from_user.id)
+    if user['stars'] < BATTLE_PASS_COST_STARS:
+        return await callback.answer(f"❌ Недостаточно звёздочек! Нужно {BATTLE_PASS_COST_STARS} ⭐.", show_alert=True)
+    
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET has_premium_bp = 1 WHERE user_id = ?", (user['user_id'],))
+    await update_balance(user['user_id'], stars=-BATTLE_PASS_COST_STARS)
+    
+    # Видаємо всі пропущені преміум нагороди
+    for level in range(1, user['bp_level']):
+        prem_rew = BP_LEVELS[level]['premium_reward']
+        if prem_rew['type'] == 'coins': await update_balance(user['user_id'], coins=prem_rew['amount'])
+        elif prem_rew['type'] == 'stars': await update_balance(user['user_id'], stars=prem_rew['amount'])
+        elif prem_rew['type'] == 'item': await add_item_to_inventory(user['user_id'], prem_rew['item_id'])
+            
+    await callback.answer("✅ Премиум Боевой Пропуск успешно куплен!", show_alert=True)
+    await cb_battle_pass(callback, FSMContext) # Оновлюємо вигляд
+
+# ----- ОСНОВНІ ОБРОБЧИКИ -----
 @main_router.message(CommandStart())
 async def cmd_start(message: Message):
     referrer_id = None
@@ -245,14 +386,8 @@ async def cmd_start(message: Message):
         await add_user(message.from_user.id, message.from_user.username, referrer_id)
         bonus = REFERRED_BONUS if referrer_id else START_COINS
         await message.answer(f"👋 Привет, {escape_markdown(message.from_user.first_name)}!\n\nДобро пожаловать! Ваш стартовый бонус: **{bonus}** монет!", reply_markup=get_main_menu_keyboard())
-        if referrer_id:
-            await update_balance(referrer_id, coins=REFERRAL_BONUS, earned=True)
-            try: await bot.send_message(referrer_id, f"🎉 По вашей ссылке присоединился новый игрок! Вам начислено **{REFERRAL_BONUS}** монет!")
-            except: pass
     else:
-        await message.answer(f"👋 С возвращением, {escape_markdown(message.from_user.first_name)}!", reply_markup=get_main_menu_keyboard())
-
-@main_router.callback_query(F.data == "check_subscription")
+        await message.answer(f"👋 С возвращением, {escape_markdown(message.from_user.first_name)}!", reply_markup=get_main_menu_keyboard())@main_router.callback_query(F.data == "check_subscription")
 async def cb_check_subscription(callback: CallbackQuery): await callback.message.delete(); await cmd_start(callback.message)
 
 @main_router.callback_query(F.data == "menu:main")
@@ -266,7 +401,7 @@ async def cancel_action(message: Message, state: FSMContext):
     if str(message.from_user.id) in ADMIN_IDS: await cmd_admin_panel(message, state)
     else: await message.answer("Вы в главном меню.", reply_markup=get_main_menu_keyboard())
 
-# ----- 🎒 ІНВЕНТАР 🎒 -----
+# ----- 🎒 ІНВЕНТАР ТА КРАФТ 🛠️ -----
 @main_router.callback_query(F.data == "menu:inventory")
 async def cb_inventory(callback: CallbackQuery):
     user_inventory = await get_user_inventory(callback.from_user.id)
@@ -274,7 +409,7 @@ async def cb_inventory(callback: CallbackQuery):
         return await callback.message.edit_text("🎒 Ваш инвентарь пуст.\n\n_Открывайте кейсы, чтобы получить коллекционные карточки и предметы!_", reply_markup=get_back_button())
     
     text = "🎒 *Ваш инвентарь:*\n\n"
-    items_by_type = {'item': [], 'card': []}
+    items_by_type = {'item': [], 'card': [], 'craft_item': []}
     for item_id, count in user_inventory:
         item_info = ITEMS.get(item_id)
         if item_info:
@@ -283,6 +418,12 @@ async def cb_inventory(callback: CallbackQuery):
     if items_by_type['item']:
         text += "*Предметы:*\n"
         for item_id, count, item_info in items_by_type['item']:
+            text += f"{item_info['name']} - {count} шт.\n"
+        text += "\n"
+        
+    if items_by_type['craft_item']:
+        text += "*Материалы для крафта:*\n"
+        for item_id, count, item_info in items_by_type['craft_item']:
             text += f"{item_info['name']} - {count} шт.\n"
         text += "\n"
 
@@ -294,6 +435,43 @@ async def cb_inventory(callback: CallbackQuery):
             text += f"{card_info['rarity']} *{card_info['name']}* - {count} шт.\n"
     
     await callback.message.edit_text(text, reply_markup=get_back_button())
+    
+@main_router.callback_query(F.data == "menu:craft")
+async def cb_craft_menu(callback: CallbackQuery):
+    user_inventory = await get_user_inventory(callback.from_user.id)
+    fragment_count = next((count for item_id, count in user_inventory if item_id == 'fragment1'), 0)
+    
+    kb = InlineKeyboardBuilder()
+    text = "🛠️ *Мастерская Крафта*\n\nЗдесь вы можете создавать новые предметы из материалов.\n\n"
+    text += f"У вас есть **{fragment_count}** фрагментов карт.\n\n"
+    
+    if fragment_count >= 10:
+        text += "Создать случайную редкую карту (требуется 10 фрагментов)."
+        kb.button(text="Создать карту (10 фрагментов)", callback_data="craft:rare_card")
+    else:
+        text += "Нужно еще **{10 - fragment_count}** фрагментов, чтобы создать случайную редкую карту."
+        
+    kb.button(text="⬅️ Назад", callback_data="menu:main")
+    await callback.message.edit_text(text, reply_markup=kb.as_markup())
+
+@main_router.callback_query(F.data == "craft:rare_card")
+async def cb_craft_rare_card(callback: CallbackQuery):
+    user_inventory = await get_user_inventory(callback.from_user.id)
+    fragment_count = next((count for item_id, count in user_inventory if item_id == 'fragment1'), 0)
+    
+    if fragment_count < 10:
+        return await callback.answer("❌ У вас недостаточно фрагментов!", show_alert=True)
+    
+    await remove_item_from_inventory(callback.from_user.id, 'fragment1', 10)
+    
+    rare_cards = [cid for cid, cinfo in ITEMS.items() if cinfo.get('rarity') == '🟢 Редкая' and cinfo.get('type') == 'card']
+    crafted_card_id = random.choice(rare_cards)
+    await add_item_to_inventory(callback.from_user.id, crafted_card_id)
+    
+    await callback.answer("✨ Вы успешно создали карту! ✨", show_alert=True)
+    await callback.message.answer(f"Вы создали: *{ITEMS[crafted_card_id]['rarity']} {ITEMS[crafted_card_id]['name']}*")
+    await cb_craft_menu(callback)
+
 
 # ----- 🤝 РЕФЕРАЛЬНА СИСТЕМА ТА ВІДГУКИ ✍️ -----
 @main_router.callback_query(F.data == "menu:referral")
@@ -325,12 +503,10 @@ async def process_feedback(message: Message, state: FSMContext):
     if ADMIN_IDS:
         for admin_id in ADMIN_IDS:
             try: await bot.send_message(admin_id, feedback_text)
-            except Exception as e: logging.error(f"Не удалось отправить отзыв админу {admin_id}: {e}")
+            except: pass
     await message.answer("✅ Спасибо! Ваш отзыв был отправлен.", reply_markup=get_main_menu_keyboard())
 
 # ----- 💻 АДМІН-ПАНЕЛЬ 💻 -----
-
-# Головне меню адмінки
 @main_router.message(Command("admin"))
 async def cmd_admin_panel(message: Message, state: FSMContext):
     if str(message.from_user.id) not in ADMIN_IDS: return
@@ -345,14 +521,10 @@ async def cmd_admin_panel(message: Message, state: FSMContext):
     kb.adjust(1)
     await message.answer("👑 **Админ-панель**", reply_markup=kb.as_markup())
 
-# Кнопка "Назад" для адмін-меню
 @main_router.callback_query(F.data == "admin:main_panel")
 async def cb_admin_panel_back(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text("👑 **Админ-панель**", reply_markup=callback.message.reply_markup)
     await cmd_admin_panel(callback.message, state)
 
-# Команда /give через reply
 @main_router.message(Command("give"))
 async def cmd_give_by_reply(message: Message):
     if str(message.from_user.id) not in ADMIN_IDS: return
@@ -365,9 +537,7 @@ async def cmd_give_by_reply(message: Message):
         target_id = message.reply_to_message.from_user.id
         target_user = await get_user(target_id)
         if not target_user: return await message.reply("❌ Этот пользователь еще не запускал бота.")
-        
         safe_username = escape_markdown(message.reply_to_message.from_user.username or "Без_юзернейма")
-        
         if currency in ["монеты", "coins"]:
             amount = int(amount_str)
             await update_balance(target_id, coins=amount, earned=(amount > 0))
@@ -382,9 +552,7 @@ async def cmd_give_by_reply(message: Message):
             await add_item_to_inventory(target_id, item_id)
             await message.reply(f"✅ Успешно выдан предмет '{ITEMS[item_id]['name']}' пользователю @{safe_username}.")
         else: await message.reply("❌ Неверный тип. Используйте 'монеты', 'звезды' или 'предмет'.")
-    except: await message.reply("❌ Ошибка в команде. Пример: `/give монеты 10000` или `/give item key1`")
-
-# Глобальна статистика
+    except: await message.reply("❌ Ошибка в команде. Пример: `/give монеты 10000` или `/give item key1`")# ----- АДМІН-ПАНЕЛЬ: ЛОГІКА КНОПОК -----
 @main_router.callback_query(F.data == "admin:global_stats")
 async def admin_global_stats(callback: CallbackQuery):
     with sqlite3.connect(DB_NAME) as conn:
@@ -401,7 +569,6 @@ async def admin_global_stats(callback: CallbackQuery):
             f"🃏 *Всего предметов в инвентарях:* {total_items:,}")
     await callback.message.edit_text(text, reply_markup=get_back_button("admin:main_panel"))
     
-# Роздача всім
 @main_router.callback_query(F.data == "admin:giveaway")
 async def admin_giveaway_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.giveaway_currency)
@@ -440,11 +607,9 @@ async def admin_giveaway_confirm(callback: CallbackQuery, state: FSMContext):
         
     await callback.message.edit_text("✅ Раздача успешно завершена!", reply_markup=get_back_button("admin:main_panel"))
 
-# Редагування балансу
 @main_router.callback_query(F.data == "admin:edit_balance")
 async def admin_edit_balance_start(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(AdminStates.get_user_id_for_balance)
-    await callback.message.edit_text("Введите ID пользователя для редактирования баланса.\n\n_Напишите 'отмена' для отмены._")
+    await state.set_state(AdminStates.get_user_id_for_balance); await callback.message.edit_text("Введите ID пользователя.\n\n_Напишите 'отмена'._")
 
 @main_router.message(AdminStates.get_user_id_for_balance)
 async def admin_edit_balance_get_id(message: Message, state: FSMContext):
@@ -452,18 +617,14 @@ async def admin_edit_balance_get_id(message: Message, state: FSMContext):
     target_id = int(message.text)
     if not await get_user(target_id):
         await message.reply("❌ Пользователь с таким ID не найден в базе.")
-        await state.clear()
-        return await cmd_admin_panel(message, state)
-    await state.update_data(target_id=target_id)
-    await state.set_state(AdminStates.get_currency_type)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="💰 Монеты", callback_data="admin_edit:coins"); kb.button(text="⭐ Звёздочки", callback_data="admin_edit:stars"); kb.button(text="🃏 Предмет", callback_data="admin_edit:item")
+        await state.clear(); return await cmd_admin_panel(message, state)
+    await state.update_data(target_id=target_id); await state.set_state(AdminStates.get_currency_type)
+    kb = InlineKeyboardBuilder(); kb.button(text="💰 Монеты", callback_data="admin_edit:coins"); kb.button(text="⭐ Звёздочки", callback_data="admin_edit:stars"); kb.button(text="🃏 Предмет", callback_data="admin_edit:item")
     await message.answer("Выберите, что хотите изменить:", reply_markup=kb.as_markup())
 
 @main_router.callback_query(F.data.startswith("admin_edit:"), AdminStates.get_currency_type)
 async def admin_edit_balance_get_type(callback: CallbackQuery, state: FSMContext):
-    currency = callback.data.split(":")[1]; await state.update_data(currency=currency)
-    await state.set_state(AdminStates.get_amount)
+    currency = callback.data.split(":")[1]; await state.update_data(currency=currency); await state.set_state(AdminStates.get_amount)
     prompt = "Введите количество (для списания -100)" if currency != 'item' else "Введите ID предмета (для списания с минусом: -key1)"
     await callback.message.edit_text(f"{prompt}.\n\n_Напишите 'отмена'._")
 
@@ -484,13 +645,10 @@ async def admin_edit_balance_get_amount(message: Message, state: FSMContext):
     else:
         try: amount = int(message.text)
         except ValueError: return await message.reply("❌ Количество должно быть целым числом.")
-        if currency == "coins":
-            await update_balance(target_id, coins=amount, earned=(amount > 0)); await message.answer(f"✅ Баланс монет пользователя {target_id} изменен на {amount}.")
-        elif currency == "stars":
-            await update_balance(target_id, stars=amount); await message.answer(f"✅ Баланс звёздочек пользователя {target_id} изменен на {amount}.")
+        if currency == "coins": await update_balance(target_id, coins=amount, earned=(amount > 0)); await message.answer(f"✅ Баланс монет пользователя {target_id} изменен на {amount}.")
+        elif currency == "stars": await update_balance(target_id, stars=amount); await message.answer(f"✅ Баланс звёздочек пользователя {target_id} изменен на {amount}.")
     await state.clear(); await cmd_admin_panel(message, state)
     
-# Перевірка гравця
 @main_router.callback_query(F.data == "admin:check_user")
 async def admin_check_user_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.get_user_id_for_stats); await callback.message.edit_text("Введите ID или @username.\n\n_Напишите 'отмена'._")
@@ -521,7 +679,6 @@ async def admin_show_user_stats(message: Message, state: FSMContext):
         await message.answer(stats_text)
     await state.clear(); await cmd_admin_panel(message, state)
 
-# Розсилка
 @main_router.callback_query(F.data == "admin:mass_send")
 async def admin_mass_send_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.get_message_for_mass_send); await callback.message.edit_text("Введите сообщение для рассылки.\n\n_Напишите 'отмена'._")
@@ -546,6 +703,7 @@ async def admin_mass_send_confirm(callback: CallbackQuery, state: FSMContext):
         try: await bot.copy_message(chat_id=user_id, from_chat_id=data['chat_id'], message_id=data['message_id']); sent_count += 1; await asyncio.sleep(0.1)
         except: failed_count += 1
     await callback.message.answer(f"✅ Рассылка завершена!\n\nОтправлено: {sent_count}\nНе удалось: {failed_count}"); await cmd_admin_panel(callback.message, state)
+
 # ----- 🎮 РОЗВАГИ 🎮 -----
 @main_router.callback_query(F.data == "menu:games")
 async def cb_games_menu(callback: CallbackQuery):
@@ -630,9 +788,7 @@ async def process_card_duel(callback: CallbackQuery):
     elif bot_card['power'] > user_card['power']: result_text += "😕 **Вы проиграли**."
     else: result_text += "🤝 **Ничья!**"
         
-    await callback.message.edit_text(result_text, reply_markup=get_back_button("menu:games"))
-
-@main_router.callback_query(F.data == "menu:profile")
+    await callback.message.edit_text(result_text, reply_markup=get_back_button("menu:games"))@main_router.callback_query(F.data == "menu:profile")
 async def cb_profile(callback: CallbackQuery):
     user = await get_user(callback.from_user.id)
     if not user: return await callback.answer("Произошла ошибка, перезапустите бота /start", show_alert=True)
