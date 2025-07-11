@@ -346,12 +346,11 @@ async def cmd_admin_panel(message: Message, state: FSMContext):
     kb.adjust(1)
     await message.answer("👑 **Админ-панель**", reply_markup=kb.as_markup())
 
-@main_router.message(F.text.lower() == "отмена", StateFilter(AdminStates, CasinoStates, ExchangeStates, FeedbackState))
-async def cancel_action(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("Действие отменено.", reply_markup=types.ReplyKeyboardRemove())
-    if str(message.from_user.id) in ADMIN_IDS: await cmd_admin_panel(message)
-    else: await message.answer("Вы в главном меню.", reply_markup=get_main_menu_keyboard())
+# Обробник для кнопки "Назад" в адмін-меню
+@main_router.callback_query(F.data == "admin:main_panel")
+async def cb_admin_panel_back(callback: CallbackQuery, state: FSMContext):
+    await cmd_admin_panel(callback.message, state)
+
 
 @main_router.message(Command("give"))
 async def cmd_give_by_reply(message: Message):
@@ -362,10 +361,13 @@ async def cmd_give_by_reply(message: Message):
         parts = message.text.split()
         currency = parts[1].lower()
         amount_str = parts[2]
+        
         target_id = message.reply_to_message.from_user.id
         target_user = await get_user(target_id)
         if not target_user: return await message.reply("❌ Этот пользователь еще не запускал бота.")
+        
         safe_username = escape_markdown(message.reply_to_message.from_user.username or "Без_юзернейма")
+        
         if currency in ["монеты", "coins"]:
             amount = int(amount_str)
             await update_balance(target_id, coins=amount, earned=(amount > 0))
@@ -382,6 +384,7 @@ async def cmd_give_by_reply(message: Message):
         else: await message.reply("❌ Неверный тип. Используйте 'монеты', 'звезды' или 'предмет'.")
     except: await message.reply("❌ Ошибка в команде. Пример: `/give монеты 10000` или `/give item key1`")
 
+# Глобальна статистика
 @main_router.callback_query(F.data == "admin:global_stats")
 async def admin_global_stats(callback: CallbackQuery):
     with sqlite3.connect(DB_NAME) as conn:
@@ -391,9 +394,14 @@ async def admin_global_stats(callback: CallbackQuery):
         cursor.execute("SELECT SUM(stars) FROM users"); total_stars = cursor.fetchone()[0] or 0
         cursor.execute("SELECT COUNT(id) FROM inventory"); total_items = cursor.fetchone()[0]
     
-    text = (f"📈 *Глобальная статистика бота:*\n\n👥 *Всего пользователей:* {total_users}\n💰 *Всего монет в экономике:* {total_coins:,}\n⭐ *Всего звёздочек в экономике:* {total_stars:,}\n🃏 *Всего предметов в инвентарях:* {total_items:,}")
+    text = (f"📈 *Глобальная статистика бота:*\n\n"
+            f"👥 *Всего пользователей:* {total_users}\n"
+            f"💰 *Всего монет в экономике:* {total_coins:,}\n"
+            f"⭐ *Всего звёздочек в экономике:* {total_stars:,}\n"
+            f"🃏 *Всего предметов в инвентарях:* {total_items:,}")
     await callback.message.edit_text(text, reply_markup=get_back_button("admin:main_panel"))
     
+# Роздача всім
 @main_router.callback_query(F.data == "admin:giveaway")
 async def admin_giveaway_start(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.giveaway_currency)
@@ -432,6 +440,108 @@ async def admin_giveaway_confirm(callback: CallbackQuery, state: FSMContext):
         
     await callback.message.edit_text("✅ Раздача успешно завершена!", reply_markup=get_back_button("admin:main_panel"))
 
+# Редагування балансу
+@main_router.callback_query(F.data == "admin:give_balance")
+async def admin_give_balance_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminStates.get_user_id_for_balance); await callback.message.edit_text("Введите ID пользователя.\n\n_Напишите 'отмена'._")
+
+@main_router.message(AdminStates.get_user_id_for_balance)
+async def admin_get_user_id(message: Message, state: FSMContext):
+    if not message.text.isdigit(): return await message.reply("❌ ID должен быть числом.")
+    await state.update_data(target_id=int(message.text)); await state.set_state(AdminStates.get_currency_type)
+    kb = InlineKeyboardBuilder(); kb.button(text="💰 Монеты", callback_data="give:coins"); kb.button(text="⭐ Звёздочки", callback_data="give:stars"); kb.button(text="🃏 Предмет", callback_data="give:item")
+    await message.answer("Выберите тип выдачи/списания:", reply_markup=kb.as_markup())
+
+@main_router.callback_query(F.data.startswith("give:"), AdminStates.get_currency_type)
+async def admin_get_currency_type(callback: CallbackQuery, state: FSMContext):
+    currency = callback.data.split(":")[1]; await state.update_data(currency=currency); await state.set_state(AdminStates.get_amount)
+    prompt = "Введите количество (для списания используйте отрицательное число, например -100)" if currency != 'item' else "Введите ID предмета для выдачи/списания (для списания укажите ID с минусом, например -key1)"
+    await callback.message.edit_text(f"{prompt}.\n\n_Напишите 'отмена'._")
+
+@main_router.message(AdminStates.get_amount)
+async def admin_get_amount(message: Message, state: FSMContext):
+    data = await state.get_data(); target_id, currency = data['target_id'], data['currency']
+    if not await get_user(target_id): return await message.reply("❌ Пользователь с таким ID не найден.")
+
+    if currency == 'item':
+        item_id = message.text
+        if item_id.startswith('-'):
+            item_to_remove = item_id[1:]
+            if item_to_remove not in ITEMS: return await message.reply(f"❌ Предмет с ID '{item_to_remove}' не найден.")
+            await remove_item_from_inventory(target_id, item_to_remove)
+            await message.answer(f"✅ Успешно удален предмет '{ITEMS[item_to_remove]['name']}' у пользователя {target_id}.")
+        else:
+            if item_id not in ITEMS: return await message.reply(f"❌ Предмет с ID '{item_id}' не найден.")
+            await add_item_to_inventory(target_id, item_id)
+            await message.answer(f"✅ Успешно выдан предмет '{ITEMS[item_id]['name']}' пользователю {target_id}.")
+    else:
+        try:
+            amount = int(message.text)
+        except ValueError:
+            return await message.reply("❌ Количество должно быть числом.")
+        
+        if currency == "coins":
+            await update_balance(target_id, coins=amount, earned=(amount > 0)); await message.answer(f"✅ Баланс монет изменен на {amount} для {target_id}.")
+        elif currency == "stars":
+            await update_balance(target_id, stars=amount); await message.answer(f"✅ Баланс звёздочек изменен на {amount} для {target_id}.")
+    await state.clear(); await cmd_admin_panel(message)
+    
+# Перевірка гравця
+@main_router.callback_query(F.data == "admin:check_user")
+async def admin_check_user_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminStates.get_user_id_for_stats); await callback.message.edit_text("Введите ID или @username.\n\n_Напишите 'отмена'._")
+
+@main_router.message(AdminStates.get_user_id_for_stats)
+async def admin_show_user_stats(message: Message, state: FSMContext):
+    user_id, user = None, None
+    user_data_input = message.text
+    if user_data_input.isdigit(): user_id = int(user_data_input); user = await get_user(user_id)
+    elif user_data_input.startswith('@'):
+        username_to_find = user_data_input[1:]
+        with sqlite3.connect(DB_NAME) as conn:
+            conn.row_factory = sqlite3.Row; cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE username = ?", (username_to_find,)); user = cursor.fetchone()
+            if user: user_id = user['user_id']
+    else: await message.reply("❌ Неверный формат."); await state.clear(); await cmd_admin_panel(message); return
+    if not user: await message.reply("❌ Пользователь не найден.")
+    else:
+        inventory_items = await get_user_inventory(user_id)
+        inventory_text = "\n\n*Инвентарь:*\n"
+        if not inventory_items: inventory_text += "_Пусто_"
+        else:
+            for item_id, count in inventory_items:
+                inventory_text += f" - {ITEMS.get(item_id, {'name': 'Неизвестный предмет'})['name']} ({item_id}) x{count}\n"
+        safe_username = escape_markdown(user['username'])
+        stats_text = (f"📊 **Статистика игрока ID `{user_id}`**\n\nЮзернейм: @{safe_username}\nМонеты: {user['coins']:,}\nЗвёздочки: {user['stars']:,}\nРанг: {RANKS[user['rank_level']][1]}"
+                      f"{inventory_text}")
+        await message.answer(stats_text)
+    await state.clear(); await cmd_admin_panel(message)
+
+# Розсилка
+@main_router.callback_query(F.data == "admin:mass_send")
+async def admin_mass_send_start(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminStates.get_message_for_mass_send); await callback.message.edit_text("Введите сообщение для рассылки.\n\n_Напишите 'отмена'._")
+
+@main_router.message(AdminStates.get_message_for_mass_send)
+async def admin_mass_send_get_msg(message: Message, state: FSMContext):
+    await state.update_data(chat_id=message.chat.id, message_id=message.message_id)
+    await state.set_state(AdminStates.confirm_mass_send)
+    kb = InlineKeyboardBuilder(); kb.button(text="✅ Отправить", callback_data="send_yes"); kb.button(text="❌ Отменить", callback_data="send_no")
+    await message.answer("Вы уверены?", reply_markup=kb.as_markup()); await bot.copy_message(chat_id=message.chat.id, from_chat_id=message.chat.id, message_id=message.message_id)
+
+@main_router.callback_query(F.data.in_({"send_yes", "send_no"}), AdminStates.confirm_mass_send)
+async def admin_mass_send_confirm(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if callback.data == "send_no":
+        await state.clear(); await callback.message.edit_text("Рассылка отменена."); await cmd_admin_panel(callback.message); return
+    await state.clear(); await callback.message.edit_text("⏳ Начинаю рассылку...")
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.cursor(); cursor.execute("SELECT user_id FROM users"); user_ids = cursor.fetchall()
+    sent_count, failed_count = 0, 0
+    for (user_id,) in user_ids:
+        try: await bot.copy_message(chat_id=user_id, from_chat_id=data['chat_id'], message_id=data['message_id']); sent_count += 1; await asyncio.sleep(0.1)
+        except: failed_count += 1
+    await callback.message.answer(f"✅ Рассылка завершена!\n\nОтправлено: {sent_count}\nНе удалось: {failed_count}"); await cmd_admin_panel(callback.message)
 # ----- 🎮 РОЗВАГИ 🎮 -----
 @main_router.callback_query(F.data == "menu:games")
 async def cb_games_menu(callback: CallbackQuery):
