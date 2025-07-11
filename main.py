@@ -333,7 +333,7 @@ def get_main_menu_keyboard():
     b = InlineKeyboardBuilder()
     b.button(text="👤 Профиль", callback_data="menu:profile"); b.button(text="🎒 Инвентарь", callback_data="menu:inventory")
     b.button(text="🎁 Кейсы", callback_data="menu:cases"); b.button(text="🎮 Развлечения", callback_data="menu:games")
-    b.button(text="📜 Квесты", callback_data="menu:quests"); b.button(text="🏆 Боевой Пропуск", callback_data="menu:battle_pass")
+    b.button(text="❌ В РАЗРАБОТКЕ", callback_data="menu:quests"); b.button(text="❌ В РАЗРАБОТКЕ", callback_data="menu:battle_pass")
     b.button(text="💱 Обмен", callback_data="menu:exchange"); b.button(text="🗓️ Бонус", callback_data="menu:daily_bonus")
     b.button(text="🏆 Топы", callback_data="menu:tops"); b.button(text="🤝 Пригласить друга", callback_data="menu:referral")
     b.button(text="✍️ Отзывы", callback_data="menu:feedback"); b.button(text="🛠️ Крафт", callback_data="menu:craft")
